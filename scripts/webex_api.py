@@ -10,18 +10,25 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 
 DEFAULT_BASE_URL = "https://webexapis.com/v1"
+TOKEN_DOC_URL = "https://developer.webex.com/docs/getting-your-personal-access-token"
 
 
 class WebexError(RuntimeError):
     """Raised when the Webex API returns an error or cannot be reached."""
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def load_json(value: str | None) -> Any:
@@ -81,7 +88,14 @@ def request(
             return json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
-        raise WebexError(f"{exc.code} {exc.reason}: {error_body}") from exc
+        message = f"{exc.code} {exc.reason}: {error_body}"
+        if exc.code in {401, 403}:
+            message += (
+                "\nWebex authentication failed. Reissue a token and save it with:\n"
+                "  python3 scripts/setup_webex_token.py\n"
+                f"Token documentation: {TOKEN_DOC_URL}"
+            )
+        raise WebexError(message, status_code=exc.code) from exc
     except urllib.error.URLError as exc:
         raise WebexError(f"Request failed: {exc.reason}") from exc
 
@@ -99,10 +113,34 @@ def build_url(base_url: str, path: str, query: dict[str, str] | None) -> str:
 
 
 def get_token(args: argparse.Namespace) -> str:
-    token = args.token or os.environ.get("WEBEX_ACCESS_TOKEN")
+    token = args.token or os.environ.get("WEBEX_ACCESS_TOKEN") or read_dotenv().get("WEBEX_ACCESS_TOKEN")
     if not token:
-        raise SystemExit("Set WEBEX_ACCESS_TOKEN or pass --token.")
+        raise SystemExit(
+            "Set WEBEX_ACCESS_TOKEN, pass --token, or run:\n"
+            "  python3 scripts/setup_webex_token.py"
+        )
     return token
+
+
+def read_dotenv(path: str | Path = ".env") -> dict[str, str]:
+    env_path = Path(path)
+    if not env_path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if value:
+            try:
+                value = shlex.split(value)[0]
+            except ValueError:
+                value = value.strip("'\"")
+        values[key] = value
+    return values
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:

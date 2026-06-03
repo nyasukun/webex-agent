@@ -65,6 +65,15 @@ Set a Webex token in your shell:
 export WEBEX_ACCESS_TOKEN='...'
 ```
 
+Or save it to `.env`:
+
+```bash
+python3 scripts/setup_webex_token.py
+```
+
+The setup script opens the Webex personal access token documentation, reads the
+token from standard input, and saves `WEBEX_ACCESS_TOKEN` to `.env`.
+
 Verify access:
 
 ```bash
